@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
-import { Icon } from 'leaflet';
+import React, { useState, useMemo, useEffect } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
+import { Icon, LatLngBounds } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import {
   LineChart,
@@ -15,12 +15,8 @@ import {
   Cell,
 } from 'recharts';
 import {
-  Plus,
   Edit,
   Trash2,
-  Download,
-  Moon,
-  Sun,
   Search,
 } from 'lucide-react';
 
@@ -46,8 +42,12 @@ interface Vehicle {
   location: string;
   lat: number;
   lng: number;
+  targetLat?: number;
+  targetLng?: number;
   driverName: string;
   driverContact: string;
+  licenseNumber: string;
+  licenseIssueDate: string;
   licenseValidity: string;
   route: string;
   tripId: string;
@@ -55,13 +55,13 @@ interface Vehicle {
   eta: string;
   deliveryStatus: string;
   insuranceExpiry: string;
+  vehicleExpiry: string;
   pollutionCheck: string;
   lastService: string;
   nextService: string;
 }
 
 const FleetPage: React.FC = () => {
-  const [darkMode, setDarkMode] = useState(false);
   const [vehicles, setVehicles] = useState<Vehicle[]>([
     {
       id: 1,
@@ -78,6 +78,8 @@ const FleetPage: React.FC = () => {
       lng: 77.2090,
       driverName: 'Rajesh Kumar',
       driverContact: '+91-9876543210',
+      licenseNumber: 'DL123456789',
+      licenseIssueDate: '2015-01-01',
       licenseValidity: '2025-12-31',
       route: 'Delhi → Mumbai',
       tripId: 'T001',
@@ -85,6 +87,7 @@ const FleetPage: React.FC = () => {
       eta: '2024-10-02 14:00',
       deliveryStatus: 'On-Time',
       insuranceExpiry: '2025-06-15',
+      vehicleExpiry: '2026-12-31',
       pollutionCheck: '2024-12-01',
       lastService: '2024-08-15',
       nextService: '2024-11-15',
@@ -104,6 +107,8 @@ const FleetPage: React.FC = () => {
       lng: 72.8777,
       driverName: 'Amit Singh',
       driverContact: '+91-9876543211',
+      licenseNumber: 'MH987654321',
+      licenseIssueDate: '2014-02-15',
       licenseValidity: '2025-11-20',
       route: 'Mumbai → Pune',
       tripId: 'T002',
@@ -111,6 +116,7 @@ const FleetPage: React.FC = () => {
       eta: '2024-10-01 16:00',
       deliveryStatus: 'Delayed',
       insuranceExpiry: '2025-07-10',
+      vehicleExpiry: '2026-11-20',
       pollutionCheck: '2024-11-15',
       lastService: '2024-07-20',
       nextService: '2024-10-20',
@@ -128,8 +134,12 @@ const FleetPage: React.FC = () => {
       location: 'Bangalore',
       lat: 12.9716,
       lng: 77.5946,
+      targetLat: 13.0827,
+      targetLng: 80.2707,
       driverName: 'Vikram Singh',
       driverContact: '+91-9876543212',
+      licenseNumber: 'KA456789123',
+      licenseIssueDate: '2016-03-20',
       licenseValidity: '2026-01-15',
       route: 'Bangalore → Chennai',
       tripId: 'T003',
@@ -137,6 +147,7 @@ const FleetPage: React.FC = () => {
       eta: '2024-10-03 10:00',
       deliveryStatus: 'On-Time',
       insuranceExpiry: '2025-08-20',
+      vehicleExpiry: '2027-01-15',
       pollutionCheck: '2024-12-10',
       lastService: '2024-09-01',
       nextService: '2024-12-01',
@@ -156,6 +167,8 @@ const FleetPage: React.FC = () => {
       lng: 80.2707,
       driverName: 'Suresh Babu',
       driverContact: '+91-9876543213',
+      licenseNumber: 'TN789123456',
+      licenseIssueDate: '2013-04-10',
       licenseValidity: '2025-09-30',
       route: 'Chennai → Hyderabad',
       tripId: 'T004',
@@ -163,6 +176,7 @@ const FleetPage: React.FC = () => {
       eta: '2024-10-04 12:00',
       deliveryStatus: 'Pending',
       insuranceExpiry: '2025-05-25',
+      vehicleExpiry: '2026-09-30',
       pollutionCheck: '2024-10-20',
       lastService: '2024-06-15',
       nextService: '2024-09-15',
@@ -182,6 +196,8 @@ const FleetPage: React.FC = () => {
       lng: 77.2090,
       driverName: 'Ravi Kumar',
       driverContact: '+91-9876543214',
+      licenseNumber: 'UP321654987',
+      licenseIssueDate: '2017-05-05',
       licenseValidity: '2026-03-10',
       route: 'Delhi → Jaipur',
       tripId: 'T005',
@@ -189,6 +205,7 @@ const FleetPage: React.FC = () => {
       eta: '2024-10-05 15:00',
       deliveryStatus: 'On-Time',
       insuranceExpiry: '2025-11-05',
+      vehicleExpiry: '2027-03-10',
       pollutionCheck: '2024-11-30',
       lastService: '2024-08-20',
       nextService: '2024-11-20',
@@ -207,6 +224,34 @@ const FleetPage: React.FC = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
   const [formData, setFormData] = useState<Partial<Vehicle>>({});
+  const [followedVehicleId, setFollowedVehicleId] = useState<number | null>(null);
+  const [fitAll, setFitAll] = useState(false);
+
+  // Real-time updates for vehicles in transit
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setVehicles((prevVehicles) =>
+        prevVehicles.map((vehicle) => {
+          if (vehicle.status === 'In Transit' && vehicle.targetLat && vehicle.targetLng) {
+            // Move towards target
+            const latDiff = vehicle.targetLat - vehicle.lat;
+            const lngDiff = vehicle.targetLng - vehicle.lng;
+            const step = 0.01; // Movement step
+            const newLat = vehicle.lat + Math.sign(latDiff) * Math.min(step, Math.abs(latDiff));
+            const newLng = vehicle.lng + Math.sign(lngDiff) * Math.min(step, Math.abs(lngDiff));
+            return {
+              ...vehicle,
+              lat: newLat,
+              lng: newLng,
+            };
+          }
+          return vehicle;
+        })
+      );
+    }, 5000); // Update every 5 seconds
+
+    return () => clearInterval(interval); // Cleanup on unmount
+  }, []);
 
   // Filtered and sorted vehicles
   const filteredVehicles = useMemo(() => {
@@ -225,8 +270,8 @@ const FleetPage: React.FC = () => {
 
     if (sortConfig) {
       filtered.sort((a, b) => {
-        const aValue = a[sortConfig.key];
-        const bValue = b[sortConfig.key];
+        const aValue = a[sortConfig.key]!;
+        const bValue = b[sortConfig.key]!;
         if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
         if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
         return 0;
@@ -271,50 +316,8 @@ const FleetPage: React.FC = () => {
     }));
   };
 
-  // Export to CSV
-  const exportToCSV = () => {
-    const headers = Object.keys(vehicles[0]).join(',');
-    const rows = vehicles.map((v) => Object.values(v).join(','));
-    const csv = [headers, ...rows].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'fleet_data.csv';
-    a.click();
-    window.URL.revokeObjectURL(url);
-  };
 
-  // Handle add vehicle
-  const handleAddVehicle = () => {
-    setEditingVehicle(null);
-    setFormData({
-      vehicleId: '',
-      type: '',
-      model: '',
-      year: new Date().getFullYear(),
-      registration: '',
-      capacity: 0,
-      fuelType: '',
-      status: 'Active',
-      location: '',
-      lat: 0,
-      lng: 0,
-      driverName: '',
-      driverContact: '',
-      licenseValidity: '',
-      route: '',
-      tripId: '',
-      cargoType: '',
-      eta: '',
-      deliveryStatus: '',
-      insuranceExpiry: '',
-      pollutionCheck: '',
-      lastService: '',
-      nextService: '',
-    });
-    setShowAddModal(true);
-  };
+
 
   // Handle edit vehicle
   const handleEditVehicle = (vehicle: Vehicle) => {
@@ -373,42 +376,81 @@ const FleetPage: React.FC = () => {
     setFormData(updatedFormData);
   };
 
+  // MapController component
+  const MapController: React.FC<{
+    followedVehicleId: number | null;
+    fitAll: boolean;
+    setFitAll: (fit: boolean) => void;
+    vehicles: Vehicle[];
+  }> = ({ followedVehicleId, fitAll, setFitAll, vehicles }) => {
+    const map = useMap();
+
+    useEffect(() => {
+      if (fitAll && vehicles.length > 0) {
+        const bounds = new LatLngBounds(
+          vehicles.map(v => [v.lat, v.lng] as [number, number])
+        );
+        map.fitBounds(bounds);
+        setFitAll(false);
+      }
+    }, [fitAll, vehicles, map, setFitAll]);
+
+    useEffect(() => {
+      if (followedVehicleId) {
+        const vehicle = vehicles.find(v => v.id === followedVehicleId);
+        if (vehicle) {
+          map.panTo([vehicle.lat, vehicle.lng]);
+        }
+      }
+    }, [followedVehicleId, vehicles, map]);
+
+    return null;
+  };
+
+  // Export CSV helper
+  const exportCSV = () => {
+    const headers = [
+      'Vehicle ID', 'Type', 'Model', 'Year', 'Registration', 'Capacity', 'Fuel Type', 'Status',
+      'Location', 'Driver Name', 'Driver Contact', 'License Number', 'License Issue Date', 'License Validity',
+      'Route', 'Trip ID', 'Cargo Type', 'ETA', 'Delivery Status', 'Insurance Expiry', 'Vehicle Expiry',
+      'Pollution Check', 'Last Service', 'Next Service'
+    ];
+    const rows = filteredVehicles.map(v => [
+      v.vehicleId, v.type, v.model, v.year, v.registration, v.capacity, v.fuelType, v.status,
+      v.location, v.driverName, v.driverContact, v.licenseNumber, v.licenseIssueDate, v.licenseValidity,
+      v.route, v.tripId, v.cargoType, v.eta, v.deliveryStatus, v.insuranceExpiry, v.vehicleExpiry,
+      v.pollutionCheck, v.lastService, v.nextService
+    ]);
+    const csvContent = [headers, ...rows].map(e => e.join(",")).join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", "fleet_vehicles.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
-    <div className={`min-h-screen p-6 transition-colors ${darkMode ? 'bg-gray-900 text-white' : 'bg-gray-50 text-gray-900'}`}>
-      {/* Header */}
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-3xl font-bold">Fleet Management</h1>
-          <p className="text-gray-500">Monitor and manage your fleet with real-time insights</p>
-        </div>
-        <div className="flex items-center space-x-4">
-          <button
-            onClick={() => setDarkMode(!darkMode)}
-            className="p-2 rounded-lg bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition"
-            aria-label="Toggle dark mode"
-          >
-            {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-          </button>
-          <button
-            onClick={handleAddVehicle}
-            className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition"
-            aria-label="Add new vehicle"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add Vehicle</span>
-          </button>
-          <button
-            onClick={exportToCSV}
-            className="flex items-center space-x-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition"
-            aria-label="Export to CSV"
-          >
-            <Download className="w-4 h-4" />
-            <span>Export CSV</span>
-          </button>
-        </div>
+    <div className="min-h-screen p-6 bg-gray-50 text-gray-900">
+      {/* Buttons top right */}
+      <div className="flex justify-end mb-4 space-x-2">
+        <button
+          onClick={() => setShowAddModal(true)}
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition"
+        >
+          Add Vehicle
+        </button>
+        <button
+          onClick={exportCSV}
+          className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition"
+        >
+          Export CSV
+        </button>
       </div>
 
-      {/* Stats Cards */}
+      {/* Stats Cards */}  
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
         <div className="bg-white dark:bg-gray-800 shadow rounded-xl p-4 hover:shadow-lg transition">
           <h3 className="text-lg font-semibold">Total Vehicles</h3>
@@ -522,12 +564,31 @@ const FleetPage: React.FC = () => {
 
       {/* Map */}
       <div className="bg-white dark:bg-gray-800 shadow rounded-xl p-4 mb-6">
-        <h3 className="text-lg font-semibold mb-4">Live Fleet Locations</h3>
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-lg font-semibold">Live Fleet Locations</h3>
+          <div className="flex space-x-2">
+            <button
+              onClick={() => setFitAll(true)}
+              className="bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700 transition text-sm"
+            >
+              Fit All
+            </button>
+            {followedVehicleId && (
+              <button
+                onClick={() => setFollowedVehicleId(null)}
+                className="bg-red-600 text-white px-3 py-1 rounded-lg hover:bg-red-700 transition text-sm"
+              >
+                Stop Following
+              </button>
+            )}
+          </div>
+        </div>
         <MapContainer center={[20.5937, 78.9629]} zoom={5} style={{ height: '400px', width: '100%' }}>
           <TileLayer
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           />
+          <MapController followedVehicleId={followedVehicleId} fitAll={fitAll} setFitAll={setFitAll} vehicles={filteredVehicles} />
           {filteredVehicles.map((vehicle) => (
             <Marker key={vehicle.id} position={[vehicle.lat, vehicle.lng]}>
               <Popup>
@@ -536,9 +597,24 @@ const FleetPage: React.FC = () => {
                   <p>Driver: {vehicle.driverName}</p>
                   <p>Status: {vehicle.status}</p>
                   <p>Location: {vehicle.location}</p>
+                  <button
+                    onClick={() => setFollowedVehicleId(vehicle.id)}
+                    className="mt-2 bg-blue-600 text-white px-2 py-1 rounded text-xs hover:bg-blue-700"
+                  >
+                    Follow This Vehicle
+                  </button>
                 </div>
               </Popup>
             </Marker>
+          ))}
+          {filteredVehicles.filter(v => v.status === 'In Transit' && v.targetLat && v.targetLng).map((vehicle) => (
+            <Polyline
+              key={`polyline-${vehicle.id}`}
+              positions={[[vehicle.lat, vehicle.lng], [vehicle.targetLat!, vehicle.targetLng!]]}
+              color="blue"
+              weight={3}
+              opacity={0.7}
+            />
           ))}
         </MapContainer>
       </div>
@@ -556,6 +632,10 @@ const FleetPage: React.FC = () => {
               <th className="p-2 cursor-pointer" onClick={() => handleSort('status')}>Status</th>
               <th className="p-2 cursor-pointer" onClick={() => handleSort('location')}>Location</th>
               <th className="p-2 cursor-pointer" onClick={() => handleSort('driverName')}>Driver</th>
+              <th className="p-2">License Validity</th>
+              <th className="p-2">Insurance Expiry</th>
+              <th className="p-2">Pollution Check</th>
+              <th className="p-2">Next Service</th>
               <th className="p-2">Actions</th>
             </tr>
           </thead>
@@ -576,6 +656,10 @@ const FleetPage: React.FC = () => {
                 </td>
                 <td className="p-2">{v.location}</td>
                 <td className="p-2">{v.driverName}</td>
+                <td className="p-2">{v.licenseValidity}</td>
+                <td className="p-2">{v.insuranceExpiry}</td>
+                <td className="p-2">{v.pollutionCheck}</td>
+                <td className="p-2">{v.nextService}</td>
                 <td className="p-2 flex space-x-2">
                   <button onClick={() => handleEditVehicle(v)} className="text-blue-600 hover:text-blue-800 transition" aria-label="Edit vehicle">
                     <Edit className="w-4 h-4" />
@@ -595,7 +679,7 @@ const FleetPage: React.FC = () => {
 
       {/* Add/Edit Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[1000]">
           <div className="bg-white dark:bg-gray-800 p-6 rounded-lg w-full max-w-md max-h-[90vh] overflow-y-auto">
             <h3 className="text-lg font-semibold mb-4">{editingVehicle ? 'Edit Vehicle' : 'Add New Vehicle'}</h3>
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -608,6 +692,7 @@ const FleetPage: React.FC = () => {
                   onChange={handleFormChange}
                   className="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
                   placeholder="Enter vehicle ID"
+                  title="Enter vehicle ID"
                   required
                 />
               </div>
@@ -636,6 +721,7 @@ const FleetPage: React.FC = () => {
                   onChange={handleFormChange}
                   className="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
                   placeholder="Enter vehicle model"
+                  title="Enter vehicle model"
                   required
                 />
               </div>
@@ -648,6 +734,7 @@ const FleetPage: React.FC = () => {
                   onChange={handleFormChange}
                   className="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
                   placeholder="Enter manufacturing year"
+                  title="Enter manufacturing year"
                   required
                 />
               </div>
@@ -660,6 +747,7 @@ const FleetPage: React.FC = () => {
                   onChange={handleFormChange}
                   className="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
                   placeholder="Enter registration number"
+                  title="Enter registration number"
                   required
                 />
               </div>
@@ -672,6 +760,7 @@ const FleetPage: React.FC = () => {
                   onChange={handleFormChange}
                   className="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
                   placeholder="Enter capacity in kg"
+                  title="Enter capacity in kg"
                   required
                 />
               </div>
@@ -733,6 +822,7 @@ const FleetPage: React.FC = () => {
                   onChange={handleFormChange}
                   className="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
                   placeholder="Enter driver name"
+                  title="Enter driver name"
                   required
                 />
               </div>
@@ -745,6 +835,104 @@ const FleetPage: React.FC = () => {
                   onChange={handleFormChange}
                   className="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
                   placeholder="Enter driver contact"
+                  title="Enter driver contact"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">License Number</label>
+                <input
+                  type="text"
+                  name="licenseNumber"
+                  value={formData.licenseNumber || ''}
+                  onChange={handleFormChange}
+                  className="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
+                  placeholder="Enter license number"
+                  title="Enter license number"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">License Issue Date</label>
+                <input
+                  type="date"
+                  name="licenseIssueDate"
+                  value={formData.licenseIssueDate || ''}
+                  onChange={handleFormChange}
+                  className="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
+                  title="Select license issue date"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">License Validity</label>
+                <input
+                  type="date"
+                  name="licenseValidity"
+                  value={formData.licenseValidity || ''}
+                  onChange={handleFormChange}
+                  className="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
+                  title="Select license validity date"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Insurance Expiry</label>
+                <input
+                  type="date"
+                  name="insuranceExpiry"
+                  value={formData.insuranceExpiry || ''}
+                  onChange={handleFormChange}
+                  className="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
+                  title="Select insurance expiry date"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Vehicle Expiry</label>
+                <input
+                  type="date"
+                  name="vehicleExpiry"
+                  value={formData.vehicleExpiry || ''}
+                  onChange={handleFormChange}
+                  className="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
+                  title="Select vehicle expiry date"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Pollution Check</label>
+                <input
+                  type="date"
+                  name="pollutionCheck"
+                  value={formData.pollutionCheck || ''}
+                  onChange={handleFormChange}
+                  className="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
+                  title="Select pollution check date"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Last Service</label>
+                <input
+                  type="date"
+                  name="lastService"
+                  value={formData.lastService || ''}
+                  onChange={handleFormChange}
+                  className="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
+                  title="Select last service date"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Next Service</label>
+                <input
+                  type="date"
+                  name="nextService"
+                  value={formData.nextService || ''}
+                  onChange={handleFormChange}
+                  className="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
+                  title="Select next service date"
                   required
                 />
               </div>
